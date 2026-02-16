@@ -11,9 +11,8 @@ jobs:
     env:
       aa2: "XCDOOD"
       aa3: "Zxxz4444"
-      KEY_CHOICE: "2"
-      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
-      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
+      # الرابط الجديد الذي طلبته
+      RUSTDESK_URL: "https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.exe"
 
     steps:
       - name: Checkout repository
@@ -32,39 +31,24 @@ jobs:
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Secure
 
-      # 2. تحميل الحزمة (هذا هو الجزء الذي كان ناقصاً وتسبب في الخطأ)
-      - name: Download Bundle & Extract
+      # 2. تحميل وتثبيت RustDesk مباشرة من الرابط الجديد
+      - name: Download & Install RustDesk
         shell: pwsh
         run: |
-          Write-Host "==== 2. DOWNLOADING APP BUNDLE ===="
-          $TempDir = Join-Path $env:TEMP 'AppBundle'
-          New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
+          Write-Host "==== 2. DOWNLOADING RUSTDESK 1.4.5 ===="
+          $InstallerPath = Join-Path $env:TEMP 'rustdesk_install.exe'
           
-          $BundleZip = Join-Path $TempDir 'bundle.zip'
-          Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing
+          # التحميل
+          Invoke-WebRequest -Uri $env:RUSTDESK_URL -OutFile $InstallerPath -UseBasicParsing
           
-          Write-Host "Extracting Bundle..."
-          $ExtractDir = Join-Path $TempDir 'Extracted'
-          Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
+          Write-Host "Installing RustDesk Silently..."
+          # التثبيت الصامت مع الانتظار حتى ينتهي
+          Start-Process -FilePath $InstallerPath -ArgumentList "--silent-install" -Wait
+          
+          Write-Host "Waiting for service to start..."
+          Start-Sleep -Seconds 15
 
-      # 3. تثبيت RustDesk
-      - name: Install RustDesk
-        shell: pwsh
-        run: |
-          $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
-          Write-Host "==== 3. INSTALLING RUSTDESK ===="
-          $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
-          
-          if ($RustInstaller) {
-              Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -Wait
-              Write-Host "RustDesk installed successfully."
-              Start-Sleep -Seconds 10
-          } else {
-              Write-Error "RustDesk installer NOT found!"
-              exit 1
-          }
-
-      # 4. استخدام بايثون لتغيير الباسورد وجلب الـ ID (طلبك الأساسي)
+      # 3. استخدام بايثون لتغيير الباسورد وجلب الـ ID
       - name: RustDesk Python Config
         shell: python
         run: |
@@ -74,6 +58,7 @@ jobs:
           import string
           import time
 
+          # المسار الافتراضي بعد التثبيت
           rustdesk_path = r"C:\Program Files\RustDesk\rustdesk.exe"
           desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
 
@@ -81,7 +66,7 @@ jobs:
           new_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
 
           try:
-              # تعيين الباسورد
+              # تعيين الباسورد (نستخدم مصفوفة الأوامر لتجنب مشاكل المسافات)
               subprocess.run([rustdesk_path, "--password", new_pass], check=True)
               time.sleep(5)
               
@@ -89,19 +74,17 @@ jobs:
               result = subprocess.run([rustdesk_path, "--get-id"], capture_output=True, text=True, check=True)
               rust_id = result.stdout.strip()
 
-              # طباعة البيانات في الـ Logs (ستراها في جيتهاب)
               print("\n" + "="*40)
               print(f"🆔 RUSTDESK ID: {rust_id}")
               print(f"🔑 PASSWORD: {new_pass}")
               print("="*40 + "\n")
 
-              # حفظ الملف على الديسك توب
               with open(desktop_path, "w") as f:
                   f.write(f"ID: {rust_id}\nPass: {new_pass}")
           except Exception as e:
-              print(f"Error: {e}")
+              print(f"Error during configuration: {e}")
 
-      # 5. إبقاء الجلسة تعمل
+      # 4. إبقاء الجلسة تعمل
       - name: Keep Session Alive
         shell: pwsh
         run: |
