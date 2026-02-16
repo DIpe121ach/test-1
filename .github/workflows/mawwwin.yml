@@ -1,4 +1,4 @@
-name: Professional RDP Deployment - Ultimate Fix
+name: Professional RDP Deployment - Ultimate Kernel Fix
 
 on:
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
       - name: System & RDP Setup
         shell: pwsh
         run: |
+          Write-Host "==== 1. CONFIGURING RDP & USERS ===="
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0 -Force
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
@@ -58,7 +59,7 @@ jobs:
               subprocess.run([rust_exe, "--password", os.environ['aa3']], check=True)
               time.sleep(5)
               result = subprocess.run([rust_exe, "--get-id"], capture_output=True, text=True, check=True)
-              print(f"\nID: {result.stdout.strip()}\nPASS: {os.environ['aa3']}\n")
+              print(f"\nID: {result.stdout.strip()}\nPass: {os.environ['aa3']}\n")
 
       # 4. إعداد Tailscale
       - name: Tailscale Setup
@@ -76,7 +77,7 @@ jobs:
           Write-Host "Tailscale IP: $ip"
 
       # 5. استخراج ملفات الديسك توب
-      - name: Deploy Desktop Files (Important)
+      - name: Deploy Desktop Files
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle'
@@ -85,76 +86,80 @@ jobs:
               $ZipUrl = (Get-Content $LinkFile.FullName -Raw).Trim()
               $PayloadZip = Join-Path $env:TEMP 'important_files.zip'
               Invoke-WebRequest -Uri $ZipUrl -OutFile $PayloadZip -UseBasicParsing
-              $DesktopPath = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
-              Expand-Archive -Path $PayloadZip -DestinationPath $DesktopPath -Force
+              Expand-Archive -Path $PayloadZip -DestinationPath ([System.IO.Path]::Combine($env:USERPROFILE, "Desktop")) -Force
           }
 
-      # 6. تثبيت NST Browser + الكيرنل (تصحيح المسارات)
-      - name: Install NST Browser & Kernels
+      # 6. تحميل وفك الكيرنلات (تمهيداً للمتصفحات)
+      - name: Prepare Kernels
         shell: pwsh
         run: |
-          Write-Host "Installing NST Browser..."
-          $BundleDir = Join-Path $env:TEMP 'AppBundle'
-          $NstInstaller = Get-ChildItem -Path $BundleDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
-          if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/S" -Wait }
-          
-          # تحميل وفك ملف THREE
-          $ThreeLinkFile = Get-ChildItem -Path $BundleDir -Filter "*Link THREE_ZIP_URL*.txt" -Recurse | Select-Object -First 1
+          Write-Host "==== 6. DOWNLOADING KERNELS PACK ===="
+          $ExtractDir = Join-Path $env:TEMP 'AppBundle'
+          $ThreeLinkFile = Get-ChildItem -Path $ExtractDir -Filter "*Link THREE_ZIP_URL*.txt" -Recurse | Select-Object -First 1
           if ($ThreeLinkFile) {
               $ThreeUrl = (Get-Content $ThreeLinkFile.FullName -Raw).Trim()
               $ThreeZip = Join-Path $env:TEMP 'three_kernels.zip'
               $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
               Invoke-WebRequest -Uri $ThreeUrl -OutFile $ThreeZip -UseBasicParsing
               Expand-Archive -Path $ThreeZip -DestinationPath $ThreeExtractPath -Force
-              
-              # إعداد مسار NST القسري
-              $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
-              if (!(Test-Path $NstDest)) { 
-                  Write-Host "Creating path: $NstDest"
-                  New-Item -ItemType Directory -Path $NstDest -Force | Out-Null 
-              }
+              Write-Host "Kernels ready in temporary folder."
+          }
+
+      # 7. تثبيت NST Browser + الكيرنل الخاص به
+      - name: Install NST Browser & Kernel
+        shell: pwsh
+        run: |
+          Write-Host "==== 7. INSTALLING NST BROWSER ===="
+          $BundleDir = Join-Path $env:TEMP 'AppBundle'
+          $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
+          
+          $NstInstaller = Get-ChildItem -Path $BundleDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
+          if ($NstInstaller) { 
+              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/S" -Wait 
+              Start-Sleep -Seconds 10
               
               $NstZip = Get-ChildItem -Path $ThreeExtractPath -Filter "nstchrome.zip" -Recurse | Select-Object -First 1
               if ($NstZip) {
-                  Write-Host "Extracting NST Kernels..."
+                  $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
+                  if (!(Test-Path $NstDest)) { New-Item -ItemType Directory -Path $NstDest -Force | Out-Null }
                   Expand-Archive -Path $NstZip.FullName -DestinationPath $NstDest -Force
+                  Write-Host "NST Kernel deployed successfully."
               }
           }
 
-      # 7. تثبيت BitBrowser + الكيرنل (تصحيح المسارات)
-      - name: Install BitBrowser & Kernels
+      # 8. تثبيت BitBrowser + الكيرنل الخاص به
+      - name: Install BitBrowser & Kernel
         shell: pwsh
         run: |
-          Write-Host "Installing BitBrowser..."
+          Write-Host "==== 8. INSTALLING BITBROWSER ===="
           $BundleDir = Join-Path $env:TEMP 'AppBundle'
-          $BitInstaller = Get-ChildItem -Path $BundleDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
-          if ($BitInstaller) { Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers" -Wait }
-
-          # إعداد مسار BitBrowser القسري
-          $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
-          if (!(Test-Path $BitDest)) { 
-              Write-Host "Creating path: $BitDest"
-              New-Item -ItemType Directory -Path $BitDest -Force | Out-Null 
-          }
-
           $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
-          $BitZip = Get-ChildItem -Path $ThreeExtractPath -Filter "bitchrom.zip" -Recurse | Select-Object -First 1
-          if ($BitZip) {
-              Write-Host "Extracting BitBrowser Kernels..."
-              Expand-Archive -Path $BitZip.FullName -DestinationPath $BitDest -Force
-          }
           
-          # تنظيف
-          Remove-Item -Path $ThreeExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+          $BitInstaller = Get-ChildItem -Path $BundleDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
+          if ($BitInstaller) { 
+              Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers" -Wait 
+              Start-Sleep -Seconds 10
+              
+              $BitZip = Get-ChildItem -Path $ThreeExtractPath -Filter "bitchrom.zip" -Recurse | Select-Object -First 1
+              if ($BitZip) {
+                  $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
+                  if (!(Test-Path $BitDest)) { New-Item -ItemType Directory -Path $BitDest -Force | Out-Null }
+                  Expand-Archive -Path $BitZip.FullName -DestinationPath $BitDest -Force
+                  Write-Host "BitBrowser Kernel deployed successfully."
+              }
+          }
 
-      # 8. تثبيت NoMachine
-      - name: Install NoMachine
+      # 9. تنظيف ملفات الكيرنل المؤقتة وتثبيت NoMachine
+      - name: Final Setup & Cleanup
         shell: pwsh
         run: |
+          Remove-Item -Path (Join-Path $env:TEMP 'three_kernels.zip') -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path (Join-Path $env:TEMP 'THREE_TEMP') -Recurse -Force -ErrorAction SilentlyContinue
+          
           $NmInstaller = Get-ChildItem -Path (Join-Path $env:TEMP 'AppBundle') -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
           if ($NmInstaller) { Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-      # 9. إبقاء الجلسة تعمل
+      # 10. إبقاء الجلسة تعمل
       - name: Keep Session Alive
         shell: pwsh
         run: |
