@@ -11,7 +11,6 @@ jobs:
     env:
       aa2: "XCDOOD"
       aa3: "Zxxz4444"
-      # الرابط الجديد الذي طلبته
       RUSTDESK_URL: "https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.exe"
 
     steps:
@@ -26,27 +25,31 @@ jobs:
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0 -Force
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
-          
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Secure
 
-      # 2. تحميل وتثبيت RustDesk مباشرة من الرابط الجديد
+      # 2. تحميل وتثبيت RustDesk (طريقة مطورة لمنع التعليق)
       - name: Download & Install RustDesk
         shell: pwsh
         run: |
           Write-Host "==== 2. DOWNLOADING RUSTDESK 1.4.5 ===="
           $InstallerPath = Join-Path $env:TEMP 'rustdesk_install.exe'
-          
-          # التحميل
           Invoke-WebRequest -Uri $env:RUSTDESK_URL -OutFile $InstallerPath -UseBasicParsing
           
           Write-Host "Installing RustDesk Silently..."
-          # التثبيت الصامت مع الانتظار حتى ينتهي
-          Start-Process -FilePath $InstallerPath -ArgumentList "--silent-install" -Wait
+          # تشغيل التثبيت مع تحديد مهلة زمنية (Timeout) لمنع التعليق للأبد
+          $Process = Start-Process -FilePath $InstallerPath -ArgumentList "--silent-install" -PassThru
+          $Process | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue
           
-          Write-Host "Waiting for service to start..."
-          Start-Sleep -Seconds 15
+          Write-Host "Checking if installation folder exists..."
+          Start-Sleep -Seconds 20
+          
+          if (Test-Path "C:\Program Files\RustDesk\rustdesk.exe") {
+              Write-Host "✅ Installation found in Program Files."
+          } else {
+              Write-Host "⚠️ Not in Program Files, checking if it runs as portable..."
+          }
 
       # 3. استخدام بايثون لتغيير الباسورد وجلب الـ ID
       - name: RustDesk Python Config
@@ -58,15 +61,28 @@ jobs:
           import string
           import time
 
-          # المسار الافتراضي بعد التثبيت
-          rustdesk_path = r"C:\Program Files\RustDesk\rustdesk.exe"
-          desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
+          # سنحاول البحث عن البرنامج في المسارين (التثبيت أو المؤقت)
+          possible_paths = [
+              r"C:\Program Files\RustDesk\rustdesk.exe",
+              os.path.join(os.environ['TEMP'], 'rustdesk_install.exe')
+          ]
+          
+          rustdesk_path = None
+          for path in possible_paths:
+              if os.path.exists(path):
+                  rustdesk_path = path
+                  break
 
-          # توليد باسورد عشوائي
+          if not rustdesk_path:
+              print("❌ Could not find RustDesk executable!")
+              exit(1)
+
+          print(f"Using RustDesk from: {rustdesk_path}")
+          desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
           new_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
 
           try:
-              # تعيين الباسورد (نستخدم مصفوفة الأوامر لتجنب مشاكل المسافات)
+              # تعيين الباسورد
               subprocess.run([rustdesk_path, "--password", new_pass], check=True)
               time.sleep(5)
               
@@ -82,7 +98,7 @@ jobs:
               with open(desktop_path, "w") as f:
                   f.write(f"ID: {rust_id}\nPass: {new_pass}")
           except Exception as e:
-              print(f"Error during configuration: {e}")
+              print(f"Error: {e}")
 
       # 4. إبقاء الجلسة تعمل
       - name: Keep Session Alive
