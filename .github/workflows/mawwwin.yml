@@ -19,36 +19,53 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. إعداد RDP والمستخدمين (كما هو)
+      # 1. إعداد RDP والمستخدمين
       - name: Setup RDP & Users
         shell: pwsh
         run: |
-          Write-Host "==== CONFIGURING RDP ===="
+          Write-Host "==== 1. CONFIGURING RDP ===="
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0 -Force
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+          
+          $Pass = $env:aa3
+          $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $Secure
 
-      # 2. تحميل الحزمة وتثبيت Tailscale (كما هو)
-      - name: Download Bundle & Install Tailscale
+      # 2. تحميل الحزمة (هذا هو الجزء الذي كان ناقصاً وتسبب في الخطأ)
+      - name: Download Bundle & Extract
         shell: pwsh
         run: |
-          # ... (نفس الكود الخاص بك لتحميل الحزمة وتثبيت Tailscale) ...
+          Write-Host "==== 2. DOWNLOADING APP BUNDLE ===="
+          $TempDir = Join-Path $env:TEMP 'AppBundle'
+          New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
+          
+          $BundleZip = Join-Path $TempDir 'bundle.zip'
+          Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing
+          
+          Write-Host "Extracting Bundle..."
+          $ExtractDir = Join-Path $TempDir 'Extracted'
+          Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
 
-      # 3. تثبيت البرامج (RustDesk أولاً)
-      - name: Install Apps (Ordered)
+      # 3. تثبيت RustDesk
+      - name: Install RustDesk
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
-          Write-Host "==== INSTALLING RUSTDESK ===="
+          Write-Host "==== 3. INSTALLING RUSTDESK ===="
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
+          
           if ($RustInstaller) {
               Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -Wait
+              Write-Host "RustDesk installed successfully."
               Start-Sleep -Seconds 10
+          } else {
+              Write-Error "RustDesk installer NOT found!"
+              exit 1
           }
 
-      # ====================================================
-      # الخطوة الجديدة: إعداد RustDesk وجلب بيانات الدخول عبر بايثون
-      # ====================================================
-      - name: Configure RustDesk & Get Credentials (Python)
+      # 4. استخدام بايثون لتغيير الباسورد وجلب الـ ID (طلبك الأساسي)
+      - name: RustDesk Python Config
         shell: python
         run: |
           import subprocess
@@ -57,48 +74,39 @@ jobs:
           import string
           import time
 
-          # 1. إعداد المسارات
-          desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
           rustdesk_path = r"C:\Program Files\RustDesk\rustdesk.exe"
+          desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
 
-          # 2. توليد كلمة مرور عشوائية
-          alphabet = string.ascii_letters + string.digits
-          new_password = ''.join(secrets.choice(alphabet) for i in range(10))
+          # توليد باسورد عشوائي
+          new_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
 
           try:
-              # التأكد من تشغيل الخدمة وتعيين الباسورد
-              print("Setting RustDesk password...")
-              subprocess.run([rustdesk_path, "--password", new_password], check=True)
+              # تعيين الباسورد
+              subprocess.run([rustdesk_path, "--password", new_pass], check=True)
+              time.sleep(5)
               
-              time.sleep(2) # انتظار قليل للتحديث
-
-              # سحب الـ ID
-              print("Fetching RustDesk ID...")
+              # جلب الـ ID
               result = subprocess.run([rustdesk_path, "--get-id"], capture_output=True, text=True, check=True)
               rust_id = result.stdout.strip()
 
-              # كتابة الملف على الديسك توب
-              with open(desktop_path, "w") as file:
-                  file.write(f"ID: {rust_id}\n")
-                  file.write(f"Password: {new_password}")
+              # طباعة البيانات في الـ Logs (ستراها في جيتهاب)
+              print("\n" + "="*40)
+              print(f"🆔 RUSTDESK ID: {rust_id}")
+              print(f"🔑 PASSWORD: {new_pass}")
+              print("="*40 + "\n")
 
-              # طباعة البيانات بشكل واضح جداً في GitHub Logs
-              print("\n" + "="*50)
-              print("🚀 RUSTDESK LOGIN DETAILS 🚀")
-              print(f"🆔 ID: {rust_id}")
-              print(f"🔑 PASSWORD: {new_password}")
-              print("="*50 + "\n")
-
+              # حفظ الملف على الديسك توب
+              with open(desktop_path, "w") as f:
+                  f.write(f"ID: {rust_id}\nPass: {new_pass}")
           except Exception as e:
-              print(f"❌ Error during RustDesk config: {e}")
+              print(f"Error: {e}")
 
-      # 4. إبقاء الجلسة تعمل
+      # 5. إبقاء الجلسة تعمل
       - name: Keep Session Alive
         shell: pwsh
         run: |
-          $KeepAliveMinutes = 350
-          Write-Host "==== SESSION ACTIVE - YOU CAN CONNECT NOW ===="
+          Write-Host "==== SESSION STARTED (350 MINS) ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
+          while ($sw.Elapsed.TotalMinutes -lt 350) {
             Start-Sleep -Seconds 60
           }
