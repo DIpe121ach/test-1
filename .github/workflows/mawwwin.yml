@@ -1,0 +1,104 @@
+name: Fast Code Base64 - Win 11
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deployment:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      aa2: "XCDOOD"
+      aa3: "Zxxz4444"
+      KEY_CHOICE: "2"
+      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
+      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. إعداد RDP والمستخدمين (كما هو)
+      - name: Setup RDP & Users
+        shell: pwsh
+        run: |
+          Write-Host "==== CONFIGURING RDP ===="
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+
+      # 2. تحميل الحزمة وتثبيت Tailscale (كما هو)
+      - name: Download Bundle & Install Tailscale
+        shell: pwsh
+        run: |
+          # ... (نفس الكود الخاص بك لتحميل الحزمة وتثبيت Tailscale) ...
+
+      # 3. تثبيت البرامج (RustDesk أولاً)
+      - name: Install Apps (Ordered)
+        shell: pwsh
+        run: |
+          $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
+          Write-Host "==== INSTALLING RUSTDESK ===="
+          $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
+          if ($RustInstaller) {
+              Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -Wait
+              Start-Sleep -Seconds 10
+          }
+
+      # ====================================================
+      # الخطوة الجديدة: إعداد RustDesk وجلب بيانات الدخول عبر بايثون
+      # ====================================================
+      - name: Configure RustDesk & Get Credentials (Python)
+        shell: python
+        run: |
+          import subprocess
+          import os
+          import secrets
+          import string
+          import time
+
+          # 1. إعداد المسارات
+          desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "vvv.txt")
+          rustdesk_path = r"C:\Program Files\RustDesk\rustdesk.exe"
+
+          # 2. توليد كلمة مرور عشوائية
+          alphabet = string.ascii_letters + string.digits
+          new_password = ''.join(secrets.choice(alphabet) for i in range(10))
+
+          try:
+              # التأكد من تشغيل الخدمة وتعيين الباسورد
+              print("Setting RustDesk password...")
+              subprocess.run([rustdesk_path, "--password", new_password], check=True)
+              
+              time.sleep(2) # انتظار قليل للتحديث
+
+              # سحب الـ ID
+              print("Fetching RustDesk ID...")
+              result = subprocess.run([rustdesk_path, "--get-id"], capture_output=True, text=True, check=True)
+              rust_id = result.stdout.strip()
+
+              # كتابة الملف على الديسك توب
+              with open(desktop_path, "w") as file:
+                  file.write(f"ID: {rust_id}\n")
+                  file.write(f"Password: {new_password}")
+
+              # طباعة البيانات بشكل واضح جداً في GitHub Logs
+              print("\n" + "="*50)
+              print("🚀 RUSTDESK LOGIN DETAILS 🚀")
+              print(f"🆔 ID: {rust_id}")
+              print(f"🔑 PASSWORD: {new_password}")
+              print("="*50 + "\n")
+
+          except Exception as e:
+              print(f"❌ Error during RustDesk config: {e}")
+
+      # 4. إبقاء الجلسة تعمل
+      - name: Keep Session Alive
+        shell: pwsh
+        run: |
+          $KeepAliveMinutes = 350
+          Write-Host "==== SESSION ACTIVE - YOU CAN CONNECT NOW ===="
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
+            Start-Sleep -Seconds 60
+          }
