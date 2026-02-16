@@ -1,4 +1,4 @@
-name: Professional RDP Deployment - Ultimate Kernel Fix
+name: Professional RDP Deployment - Kernel Fix
 
 on:
   workflow_dispatch:
@@ -23,7 +23,6 @@ jobs:
       - name: System & RDP Setup
         shell: pwsh
         run: |
-          Write-Host "==== 1. CONFIGURING RDP & USERS ===="
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0 -Force
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
@@ -35,7 +34,7 @@ jobs:
               Add-LocalGroupMember Administrators $env:aa2
           }
 
-      # 2. تحميل الحزمة الأساسية (Bundle)
+      # 2. تحميل الحزمة الأساسية
       - name: Download & Extract App Bundle
         shell: pwsh
         run: |
@@ -54,12 +53,11 @@ jobs:
           rust_installer = next((os.path.join(root, f) for root, _, files in os.walk(bundle_dir) for f in files if "rust" in f.lower() and f.endswith(".exe")), None)
           if rust_installer:
               subprocess.run([rust_installer, "--silent-install"], check=True)
-              time.sleep(15)
+              time.sleep(10)
               rust_exe = r"C:\Program Files\RustDesk\rustdesk.exe"
               subprocess.run([rust_exe, "--password", os.environ['aa3']], check=True)
-              time.sleep(5)
               result = subprocess.run([rust_exe, "--get-id"], capture_output=True, text=True, check=True)
-              print(f"\nID: {result.stdout.strip()}\nPass: {os.environ['aa3']}\n")
+              print(f"RUSTDESK ID: {result.stdout.strip()}")
 
       # 4. إعداد Tailscale
       - name: Tailscale Setup
@@ -73,96 +71,87 @@ jobs:
           $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Encoded)).Trim()
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=RDP-Professional" -Wait
-          $ip = & $TsExe ip -4
-          Write-Host "Tailscale IP: $ip"
+          Write-Host "Tailscale IP: $(& $TsExe ip -4)"
 
-      # 5. استخراج ملفات الديسك توب
-      - name: Deploy Desktop Files
+      # 5. تحميل ملفات THREE (الكيرنلات) مبكراً
+      - name: Pre-download Kernels
         shell: pwsh
         run: |
-          $ExtractDir = Join-Path $env:TEMP 'AppBundle'
-          $LinkFile = Get-ChildItem -Path $ExtractDir -Filter "*Link ZIP_URL*.txt" -Recurse | Select-Object -First 1
-          if ($LinkFile) {
-              $ZipUrl = (Get-Content $LinkFile.FullName -Raw).Trim()
-              $PayloadZip = Join-Path $env:TEMP 'important_files.zip'
-              Invoke-WebRequest -Uri $ZipUrl -OutFile $PayloadZip -UseBasicParsing
-              Expand-Archive -Path $PayloadZip -DestinationPath ([System.IO.Path]::Combine($env:USERPROFILE, "Desktop")) -Force
-          }
-
-      # 6. تحميل وفك الكيرنلات (تمهيداً للمتصفحات)
-      - name: Prepare Kernels
-        shell: pwsh
-        run: |
-          Write-Host "==== 6. DOWNLOADING KERNELS PACK ===="
           $ExtractDir = Join-Path $env:TEMP 'AppBundle'
           $ThreeLinkFile = Get-ChildItem -Path $ExtractDir -Filter "*Link THREE_ZIP_URL*.txt" -Recurse | Select-Object -First 1
           if ($ThreeLinkFile) {
               $ThreeUrl = (Get-Content $ThreeLinkFile.FullName -Raw).Trim()
               $ThreeZip = Join-Path $env:TEMP 'three_kernels.zip'
-              $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
+              $ThreePath = Join-Path $env:TEMP 'THREE_EXTRACTED'
               Invoke-WebRequest -Uri $ThreeUrl -OutFile $ThreeZip -UseBasicParsing
-              Expand-Archive -Path $ThreeZip -DestinationPath $ThreeExtractPath -Force
-              Write-Host "Kernels ready in temporary folder."
+              Expand-Archive -Path $ThreeZip -DestinationPath $ThreePath -Force
           }
 
-      # 7. تثبيت NST Browser + الكيرنل الخاص به
-      - name: Install NST Browser & Kernel
+      # 6. تثبيت NST Browser + الكيرنل
+      - name: NST Browser Setup
         shell: pwsh
         run: |
-          Write-Host "==== 7. INSTALLING NST BROWSER ===="
           $BundleDir = Join-Path $env:TEMP 'AppBundle'
-          $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
-          
+          $ThreePath = Join-Path $env:TEMP 'THREE_EXTRACTED'
           $NstInstaller = Get-ChildItem -Path $BundleDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
-          if ($NstInstaller) { 
-              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/S" -Wait 
-              Start-Sleep -Seconds 10
+          
+          if ($NstInstaller) {
+              Write-Host "Installing NST Browser..."
+              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/S" -Wait
               
-              $NstZip = Get-ChildItem -Path $ThreeExtractPath -Filter "nstchrome.zip" -Recurse | Select-Object -First 1
+              $NstZip = Get-ChildItem -Path $ThreePath -Filter "nstchrome.zip" -Recurse | Select-Object -First 1
               if ($NstZip) {
                   $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
-                  if (!(Test-Path $NstDest)) { New-Item -ItemType Directory -Path $NstDest -Force | Out-Null }
+                  # إنشاء المجلد مع التأكد من وجود المسار الأب
+                  if (!(Test-Path $NstDest)) { New-Item -Path $NstDest -ItemType Directory -Force }
                   Expand-Archive -Path $NstZip.FullName -DestinationPath $NstDest -Force
-                  Write-Host "NST Kernel deployed successfully."
+                  Write-Host "NST Kernel Extracted to: $NstDest"
               }
           }
 
-      # 8. تثبيت BitBrowser + الكيرنل الخاص به
-      - name: Install BitBrowser & Kernel
+      # 7. تثبيت BitBrowser + الكيرنل
+      - name: BitBrowser Setup
         shell: pwsh
         run: |
-          Write-Host "==== 8. INSTALLING BITBROWSER ===="
           $BundleDir = Join-Path $env:TEMP 'AppBundle'
-          $ThreeExtractPath = Join-Path $env:TEMP 'THREE_TEMP'
-          
+          $ThreePath = Join-Path $env:TEMP 'THREE_EXTRACTED'
           $BitInstaller = Get-ChildItem -Path $BundleDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
-          if ($BitInstaller) { 
-              Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers" -Wait 
-              Start-Sleep -Seconds 10
+          
+          if ($BitInstaller) {
+              Write-Host "Installing BitBrowser..."
+              Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers" -Wait
               
-              $BitZip = Get-ChildItem -Path $ThreeExtractPath -Filter "bitchrom.zip" -Recurse | Select-Object -First 1
+              $BitZip = Get-ChildItem -Path $ThreePath -Filter "bitchrom.zip" -Recurse | Select-Object -First 1
               if ($BitZip) {
                   $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
-                  if (!(Test-Path $BitDest)) { New-Item -ItemType Directory -Path $BitDest -Force | Out-Null }
+                  # إنشاء المجلد مع التأكد من وجود المسار الأب
+                  if (!(Test-Path $BitDest)) { New-Item -Path $BitDest -ItemType Directory -Force }
                   Expand-Archive -Path $BitZip.FullName -DestinationPath $BitDest -Force
-                  Write-Host "BitBrowser Kernel deployed successfully."
+                  Write-Host "BitBrowser Kernel Extracted to: $BitDest"
               }
           }
 
-      # 9. تنظيف ملفات الكيرنل المؤقتة وتثبيت NoMachine
-      - name: Final Setup & Cleanup
+      # 8. ملفات الديسك توب وتثبيت NoMachine
+      - name: Desktop Files & NoMachine
         shell: pwsh
         run: |
-          Remove-Item -Path (Join-Path $env:TEMP 'three_kernels.zip') -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path (Join-Path $env:TEMP 'THREE_TEMP') -Recurse -Force -ErrorAction SilentlyContinue
-          
-          $NmInstaller = Get-ChildItem -Path (Join-Path $env:TEMP 'AppBundle') -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
+          $ExtractDir = Join-Path $env:TEMP 'AppBundle'
+          # Desktop Files
+          $LinkFile = Get-ChildItem -Path $ExtractDir -Filter "*Link ZIP_URL*.txt" -Recurse | Select-Object -First 1
+          if ($LinkFile) {
+              $ZipUrl = (Get-Content $LinkFile.FullName -Raw).Trim()
+              $PayloadZip = Join-Path $env:TEMP 'payload.zip'
+              Invoke-WebRequest -Uri $ZipUrl -OutFile $PayloadZip -UseBasicParsing
+              Expand-Archive -Path $PayloadZip -DestinationPath ([System.IO.Path]::Combine($env:USERPROFILE, "Desktop")) -Force
+          }
+          # NoMachine
+          $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
           if ($NmInstaller) { Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-      # 10. إبقاء الجلسة تعمل
+      # 9. إبقاء الجلسة تعمل
       - name: Keep Session Alive
         shell: pwsh
         run: |
-          Write-Host "==== ALL TASKS COMPLETED - RDP READY ===="
+          Write-Host "==== ALL TASKS COMPLETED ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
           while ($sw.Elapsed.TotalMinutes -lt 350) { Start-Sleep -Seconds 60 }
